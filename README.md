@@ -10,15 +10,11 @@ By Sardor Nurmurodov.
 
 ```
 Set up multirouter for me. Clone https://github.com/drugenemy/multirouter into
-~/multirouter (if it is private, use my GitHub login), then open SETUP.md in it
-and follow it step by step.
+~/multirouter, then open SETUP.md in it and follow it step by step.
 ```
 
 Claude Code runs the installer, walks you through getting free keys one by one,
 tests every model, and tells you how to start. Works on macOS and Linux (Windows: use WSL).
-
-The repo is private: only people Sardor adds on GitHub can clone it, and they need
-to be logged in to GitHub on their own computer (`gh auth login`).
 
 ## What you get
 
