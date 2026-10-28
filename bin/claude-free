@@ -1,0 +1,127 @@
+#!/usr/bin/env bash
+# Claude Code on free models, through the local LiteLLM router.
+# Your normal `claude` and the desktop app are not touched.
+#
+#   claude-free            start the router if needed, then open Claude Code here
+#   claude-free restart    rebuild the model list from .env and restart the router
+#   claude-free stop       stop the router
+#   claude-free status     show which models the router has
+#   claude-free check      test every model once (run after adding keys)
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+ENV_FILE="$ROOT/.env"
+CONFIG="$ROOT/config.yaml"
+LOG="$ROOT/logs/router.log"
+PORT="${MULTIROUTER_PORT:-4520}"
+URL="http://127.0.0.1:$PORT"
+
+mkdir -p "$ROOT/logs"
+[ -f "$ENV_FILE" ] || { cp "$ROOT/.env.example" "$ENV_FILE"; chmod 600 "$ENV_FILE"; }
+
+if ! grep -q '^LITELLM_MASTER_KEY=.\+' "$ENV_FILE"; then
+  # python, not openssl / sed -i / perl: the one tool every install already has
+  "$ROOT/.venv/bin/python" -c '
+import secrets, sys
+from pathlib import Path
+path = Path(sys.argv[1])
+lines = [l for l in path.read_text().splitlines() if not l.startswith("LITELLM_MASTER_KEY=")]
+path.write_text("\n".join(lines + ["LITELLM_MASTER_KEY=sk-local-" + secrets.token_hex(16)]) + "\n")
+' "$ENV_FILE"
+fi
+MASTER_KEY="$(grep -m1 '^LITELLM_MASTER_KEY=' "$ENV_FILE" | cut -d= -f2- | tr -d "\"'")"
+
+alive() { curl -sf "$URL/health/liveliness" >/dev/null 2>&1; }
+PIDFILE="$ROOT/logs/router.pid"
+# lsof also finds a router whose pidfile went stale; many Linux images lack lsof
+router_pids() {
+  if command -v lsof >/dev/null 2>&1; then
+    lsof -ti "tcp:$PORT" -sTCP:LISTEN 2>/dev/null || true
+  elif [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+    cat "$PIDFILE"
+  fi
+}
+
+# master key goes through stdin, not the command line, so `ps` cannot see it
+api() { curl -s -m 300 -H @- "$URL$1" <<< "Authorization: Bearer $MASTER_KEY"; }
+
+stop_router() {
+  local pids
+  pids="$(router_pids)"
+  rm -f "$PIDFILE"
+  [ -n "$pids" ] || return 0
+  kill $pids 2>/dev/null || true
+  for _ in $(seq 1 15); do
+    [ -z "$(router_pids)" ] && return 0
+    sleep 1
+  done
+  kill -9 $(router_pids) 2>/dev/null || true
+  sleep 1
+}
+
+start_router() {
+  local pid
+  (cd "$ROOT" && .venv/bin/python build_config.py)
+  # keys go only to the router process, never to Claude Code
+  pid="$( set -a; source "$ENV_FILE"; set +a
+    cd "$ROOT"
+    nohup .venv/bin/litellm --config "$CONFIG" --host 127.0.0.1 --port "$PORT" \
+      > "$LOG" 2>&1 &
+    echo $! )"
+  echo "$pid" > "$PIDFILE"
+  for _ in $(seq 1 90); do
+    alive && return 0
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 1
+  done
+  kill "$pid" 2>/dev/null || true
+  echo "Router did not start. Last lines of $LOG:" >&2
+  # hide anything shaped like a provider key before it reaches a screen or a chat
+  tail -20 "$LOG" | sed -E 's/(sk-|nvapi-|gsk_|AIza)[A-Za-z0-9_.-]+/\1***/g' >&2
+  exit 1
+}
+
+case "${1:-}" in
+  stop) stop_router; echo "Router stopped."; exit 0 ;;
+  restart) stop_router; start_router; echo "Router restarted."; exit 0 ;;
+  status)
+    alive || { echo "Router is not running."; exit 0; }
+    api /model/info | "$ROOT/.venv/bin/python" -c '
+import json, sys
+for m in json.load(sys.stdin)["data"]:
+    p = m["litellm_params"]
+    print(m["model_name"], p.get("order"), p["model"])'
+    exit 0 ;;
+  check)
+    # sends one tiny request to every model; shows which keys and model names work
+    alive || start_router
+    api /health | "$ROOT/.venv/bin/python" -c '
+import json, sys
+r = json.load(sys.stdin)
+for ok, items in (("OK  ", r.get("healthy_endpoints", [])), ("FAIL", r.get("unhealthy_endpoints", []))):
+    for e in items:
+        err = (e.get("error") or "").splitlines()[0][:90] if ok == "FAIL" else ""
+        print(ok, e.get("model"), e.get("api_base") or "", err)'
+    exit 0 ;;
+esac
+
+# rebuild if .env changed since the router started
+# (this also restarts it under any other open claude-free window)
+if [ -n "$(router_pids)" ] && [ "$ENV_FILE" -nt "$CONFIG" ]; then stop_router; fi
+alive || start_router
+
+# runs in the folder you called it from
+env -u ANTHROPIC_API_KEY \
+  CLAUDE_CONFIG_DIR="$HOME/.claude-free" \
+  ANTHROPIC_BASE_URL="$URL" \
+  ANTHROPIC_AUTH_TOKEN="$MASTER_KEY" \
+  ANTHROPIC_MODEL=best \
+  ANTHROPIC_DEFAULT_OPUS_MODEL=best \
+  ANTHROPIC_DEFAULT_FABLE_MODEL=best \
+  ANTHROPIC_DEFAULT_SONNET_MODEL=best \
+  ANTHROPIC_DEFAULT_HAIKU_MODEL=fast \
+  ANTHROPIC_SMALL_FAST_MODEL=fast \
+  CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 \
+  CLAUDE_CODE_MAX_CONTEXT_TOKENS=128000 \
+  CLAUDE_CODE_PLUGIN_DIRS="$ROOT/mods/free-token-counter" \
+  claude "$@"

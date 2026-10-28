@@ -1,0 +1,6 @@
+.env
+.venv/
+logs/
+config.yaml
+__pycache__/
+mods/*/.claude-plugin/types/

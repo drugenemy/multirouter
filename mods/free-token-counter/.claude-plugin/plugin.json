@@ -1,0 +1,8 @@
+{
+  "name": "free-token-counter",
+  "version": "0.1.0",
+  "description": "Colorful all-time token counter for claude-free, with words that change every few seconds",
+  "types": "./types/index.d.ts",
+  "license": "MIT",
+  "author": { "name": "Sardor Nurmurodov" }
+}
