@@ -53,6 +53,12 @@ PROVIDERS = [
     ("fast", 1, "openai/nvidia/nemotron-3.5-lightning-30b-a3b", NVIDIA, "NVIDIA_API_KEY"),
     ("fast", 2, "gemini/gemini-3.5-flash-lite", None, "GEMINI_API_KEY"),
     ("fast", 3, "openai/gpt-oss:20b", LLM7, "?LLM7_API_KEY"),
+    # read-* : one image-reading model each, no fallback, so a page score names its model
+    # (added 2026-10-28 for the old-archives reading engine, ~/Desktop/free-projects/uz-old-archives)
+    ("read-gemini-flash", 1, "gemini/gemini-3.5-flash", None, "GEMINI_API_KEY"),
+    ("read-gemini-lite", 1, "gemini/gemini-3.5-flash-lite", None, "GEMINI_API_KEY"),
+    ("read-gemma", 1, "openrouter/google/gemma-4-31b-it:free", None, "OPENROUTER_API_KEY"),
+    ("read-llama-scout", 1, "groq/meta-llama/llama-4-scout-17b-16e-instruct", None, "GROQ_API_KEY"),
 ]
 
 
